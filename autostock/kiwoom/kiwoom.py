@@ -23,9 +23,9 @@ class Kiwoom(QAxWidget):
         ##### 요청 스크린번호(화면번호) 모음 ############################
         self.screen_my_info = "2000"  # 계좌 관련한 스크린 번호
         self.screen_calculation_stock = "4000"  # 계산용 스크린 번호
-        self.screen_real_stock = "5000"  # 종목별 할당할 스크린 번호
-        self.screen_meme_stock = "6000"  # 종목별 할당할 주문용 스크린 번호
-        self.screen_start_stop_real = "1000"  # 장 시작/종료 실시간 스크린 번호
+        # self.screen_real_stock = "5000"  # 종목별 할당할 스크린 번호
+        # self.screen_meme_stock = "6000"  # 종목별 할당할 주문용 스크린 번호
+        # self.screen_start_stop_real = "1000"  # 장 시작/종료 실시간 스크린 번호
 
         ##################################################
 
@@ -36,8 +36,11 @@ class Kiwoom(QAxWidget):
 
         ##################################################
 
+        #####종목분석용 #############################
+        self.calcul_data = []
+
         ##### 계좌 거래 관련 변수 모음 ############################
-        self.use_money = 0
+        self.use_money = 0  # 실제 투자에 사용할 금액
         self.use_money_percent = 0.5  # 계좌에서 거래에 사용할 금액 비중.
 
         ##################################################
@@ -49,19 +52,43 @@ class Kiwoom(QAxWidget):
         self.get_account_info()     # 계좌번호 가져오기
         self.detail_account_info()  # 예수금 요청
         self.detail_account_mystock()  # 계좌평가잔고내역 요청
+        self.not_concluded_account()
         # 5초 뒤에 미체결 종목들 가져오기 실행
-        QTimer.singleShot(5000, self.not_concluded_account)
+        # QTimer.singleShot(5000, self.not_concluded_account)
 
         self.calculator_fnc()  # 종목분석 실행 (임시용)
 
         ##################################################
 
+        # QTest.qWait(10000)
+        # self.read_code()
+        # self.screen_number_setting()
+
+        # QTest.qWait(5000)
+
+        # # 실시간 수신 관련 함수
+        # self.dynamicCall("SetRealReg(QString, QString, QString, QString)",
+        #                  self.screen_start_stop_real, '', self.realType.REALTYPE['장시작시간']['장운영구분'], "0")
+
+        # for code in self.portfolio_stock_dict.keys():
+        #     screen_num = self.portfolio_stock_dict[code]['스크린번호']
+        #     fids = self.realType.REALTYPE['주식체결']['체결시간']
+        #     self.dynamicCall(
+        #         "SetRealReg(QString, QString, QString, QString)", screen_num, code, fids, "1")
+
+        # self.slack.notification(
+        #     pretext="주식자동화 프로그램 동작",
+        #     title="주식 자동화 프로그램 동작",
+        #     fallback="주식 자동화 프로그램 동작",
+        #     text="주식 자동화 프로그램이 동작 되었습니다."
+        # )
+
     def get_ocx_instance(self):  # Kiwoom OpenKPI 접속
         self.setControl('KHOPENAPI.KHOpenAPICtrl.1')  # 레지스트리에 등록된 이름
 
     def event_slots(self):  # 이벤트 처리구역과 tr목록구역 생성
-        self.OnEventConnect.connect(self.login_slot)  # 로그인 처리 진행용.
-        self.OnReceiveTrData.connect(self.trdata_slot)  # tr 목록 data 가져오는 용도
+        self.OnEventConnect.connect(self.login_slot)  # 로그인 처리 이벤트 용도.
+        self.OnReceiveTrData.connect(self.trdata_slot)  # tr(트랜잭션) 요청관련 이벤트 용도.
         # self.OnReceiveMsg.connect(self.msg_slot)
 
     # 로그인은 CommConnect()함수를 호출하며 OnEventConnect 이벤트 인자값으로 로그인
@@ -71,8 +98,8 @@ class Kiwoom(QAxWidget):
 
         self.login_event_loop.exec_()  # 이벤트 루프 실행
 
-    def login_slot(self, errCode):
-        print(errors(errCode))
+    def login_slot(self, err_code):
+        print(errors(err_code))
         # self.logging.logger.debug(errors(err_code)[1])
         # 로그인 처리가 완료됐으면 이벤트 루프를 종료한다.
         self.login_event_loop.exit()
@@ -80,7 +107,7 @@ class Kiwoom(QAxWidget):
     def get_account_info(self):
         account_list = self.dynamicCall(
             "GetLoginInfo(QString)", "ACCNO")  # 계좌번호 반환
-        account_num = account_list.split(';')[0]  # a;b;c  [a, b, c]
+        account_num = account_list.split(';')[0]  # a;b;c   [a, b, c]
 
         self.account_num = account_num
         print('나의 보유계좌번호: %s' % self.account_num)  # 8158893311
@@ -164,29 +191,33 @@ class Kiwoom(QAxWidget):
             self.total_profit_rate = float(total_profit_rate)
 
             print('총매입금액: %s\n총평가손익금액: %s\n총수익률(%%): %s' % (
-                total_buy_amount, total_profit_amount, total_profit_rate))
-            #self.logging.logger.debug("계좌평가잔고내역요청 싱글데이터 : %s - %s - %s" % (total_buy_amount, total_profit_amount, total_profit_rate))
+                int(total_buy_amount), int(total_profit_amount), float(total_profit_rate)))
+            #self.logging.logger.debug("계좌평가잔고내역요청 싱글데이터 : %s - %s - %s" % (int(total_buy_amount), int(total_profit_amount), float(total_profit_rate)))
+
+            # 한page에 20개까지만 불러오기 가능.
 
             rows = self.dynamicCall(
-                'GetRepeatCnt(QString, QString', sTrCode, sRQName)  # 한page에 20개까지만 불러오기 가능.
+                "GetRepeatCnt(QString, QString)", sTrCode, sRQName)
+
+            print(rows)
 
             for i in range(rows):
                 code = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '종목번호')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '종목번호')
                 code_nm = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '종목명')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '종목명')
                 learn_rate = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '수익률(%)')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '수익률(%)')
                 buy_price = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '매입가')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '매입가')
                 current_price = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '현재가')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '현재가')
                 stock_quantity = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '보유수량')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '보유수량')
                 total_maeip_amount = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '매입금액')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '매입금액')
                 current_amount = self.dynamicCall(
-                    'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '평가금액')
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '평가금액')
 
                 #self.logging.logger.debug("종목번호: %s - 종목명: %s - 수익률: %s - 매입가:%s - 현재가: %s - 보유수량: %s " % (code, code_nm, learn_rate, buy_price, current_price, stock_quantity))
 
@@ -196,9 +227,11 @@ class Kiwoom(QAxWidget):
                 buy_price = int(buy_price.strip())
                 current_price = int(current_price.strip())
                 stock_quantity = int(stock_quantity.strip())
-                possible_quantity = int(possible_quantity.strip())
                 total_maeip_amount = int(total_maeip_amount.strip())
                 current_amount = int(current_amount.strip())
+
+                print('종목명: %s\n수익률(%%): %s\n매입가: %s\n현재가: %s\n보유수량: %s\n매입금액: %s\n평가금액: %s' % (
+                    code_nm, learn_rate, buy_price, current_price, stock_quantity, total_maeip_amount, current_amount))
 
                 if code in self.account_stock_dict:
                     pass
@@ -213,12 +246,11 @@ class Kiwoom(QAxWidget):
                 asd.update({'매입가': buy_price})
                 asd.update({'현재가': current_price})
                 asd.update({'보유수량': stock_quantity})
-                asd.update({'매매가능수량': possible_quantity})
                 asd.update({'매입금액': total_maeip_amount})
                 asd.update({'평가금액': current_amount})
 
             print('내 계좌에 있는 종목수: %s' % len(self.account_stock_dict))
-            #self.logging.logger.debug("sPreNext : %s" % sPrevNext)
+            #self.logging.logger.debug("sPrevNext : %s" % sPrevNext)
             #self.logging.logger.debug("계좌에 가지고 있는 종목은 %s " % rows)
 
             if sPrevNext == '2':
@@ -228,7 +260,7 @@ class Kiwoom(QAxWidget):
 
         elif sRQName == '실시간미체결현황':
             rows = self.dynamicCall(
-                'GetRepeatCnt(QString, QString', sTrCode, sRQName)
+                "GetRepeatCnt(QString, QString)", sTrCode, sRQName)
             for i in range(rows):
                 code = self.dynamicCall(
                     'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '종목번호')
@@ -298,7 +330,7 @@ class Kiwoom(QAxWidget):
             cnt = self.dynamicCall(
                 "GetRepeatCnt(QString, QString)", sTrCode, sRQName)
 
-            print(cnt)
+            print('데이터 일수: %s' % cnt)
             # self.logging.logger.debug("남은 일자 수 %s" % cnt)
 
             if sPrevNext == '2':
