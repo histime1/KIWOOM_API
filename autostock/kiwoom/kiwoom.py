@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 from PyQt5.QAxContainer import *  # 응용프로그램 제어용
 from PyQt5.QtCore import *
 from autostock.config.errorCode import *
@@ -30,13 +31,15 @@ class Kiwoom(QAxWidget):
         ##################################################
 
         ##### 변수 모음 ############################
+        self.dir = 'C:/Users/histi/py37_32/autostock/'
+        # max_day = 20 max_day 이상 고가/저가가 이평선 위에 있는 경우. 변수 검색하여 조정
         self.account_num = None
         self.account_stock_dict = {}  # 계좌평가잔고내역요청에 따른 계좌내 종목 dict
         self.not_account_stock_dict = {}  # 미체결내역 dict
 
         ##################################################
 
-        #####종목분석용 #############################
+        ##### 종목분석용 변수 모음 ##########################
         self.calcul_data = []
 
         ##### 계좌 거래 관련 변수 모음 ############################
@@ -53,9 +56,10 @@ class Kiwoom(QAxWidget):
         self.detail_account_info()  # 예수금 요청
         self.detail_account_mystock()  # 계좌평가잔고내역 요청
         # 5초 뒤에 미체결 종목들 가져오기 실행
-        QTimer.singleShot(5000, self.not_concluded_account)
+        # QTimer.singleShot(5000, self.not_concluded_account)
 
-        self.calculator_fnc()  # 종목분석 실행 (임시용)
+        # self.calculator_fnc()  # 종목분석 실행 (임시용)
+        self.read_code()  # 저장된 종목을 불러온다.
 
         ##################################################
 
@@ -248,7 +252,7 @@ class Kiwoom(QAxWidget):
                 asd.update({'매입금액': total_maeip_amount})
                 asd.update({'평가금액': current_amount})
 
-            print('내 계좌에 있는 종목수: %s' % len(self.account_stock_dict))
+            print('내 계좌에 있는 종목수: %s\n' % len(self.account_stock_dict))
             #self.logging.logger.debug("sPrevNext : %s" % sPrevNext)
             #self.logging.logger.debug("계좌에 가지고 있는 종목은 %s " % rows)
 
@@ -311,7 +315,7 @@ class Kiwoom(QAxWidget):
                 nasd.update({'미체결수량': not_quantity})
                 nasd.update({'체결량': ok_quantity})
 
-                print('미체결종목: %s' % self.not_account_stock_dict[order_no])
+                print('미체결종목: %s\n' % self.not_account_stock_dict[order_no])
                 #self.logging.logger.debug("미체결 종목 : %s " % self.not_account_stock_dict[order_no])
 
             self.detail_account_info_event_loop.exit()
@@ -329,16 +333,142 @@ class Kiwoom(QAxWidget):
             cnt = self.dynamicCall(
                 "GetRepeatCnt(QString, QString)", sTrCode, sRQName)
 
-            print('데이터 일수: %s' % cnt)
+            print('데이터 일수: %s\n' % cnt)
             # self.logging.logger.debug("남은 일자 수 %s" % cnt)
+
+            # 한번조회할때 600일치까지 일봉 data를 받을 수 있다.
+            for i in range(cnt):
+                # data = self.dynamicCall('GetCommData(QString, QString)', sTrCode, sRQName)
+                # 결과물 [['', '현재가', '거래량', '거래금액', '일자', '시가', '고가', '저가',''],['', '현재가', '거래량', '거래금액', '일자', '시가', '고가', '저가','']]
+                data = []
+
+                current_price = self.dynamicCall(
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "현재가")
+                value = self.dynamicCall(
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "거래량")
+                trading_value = self.dynamicCall(
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "거래대금")
+                date = self.dynamicCall(
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "일자")
+                start_price = self.dynamicCall(
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "시가")
+                high_price = self.dynamicCall(
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "고가")
+                low_price = self.dynamicCall(
+                    "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, "저가")
+
+                data.append("")
+                data.append(current_price.strip())
+                data.append(value.strip())
+                data.append(trading_value.strip())
+                data.append(date.strip())
+                data.append(start_price.strip())
+                data.append(high_price.strip())
+                data.append(low_price.strip())
+                data.append("")
+
+                self.calcul_data.append(data.copy())
+                # calcul_data 내용 [['', '현재가', '거래량', '거래금액', '일자', '시가', '고가', '저가',''], [....]]
 
             if sPrevNext == '2':
                 self.day_kiwoom_db(code=code, sPrevNext=sPrevNext)
 
             else:
+                print('총 일수 %s' % len(self.calcul_data))
+
+                ### 종목 선정 조건 설정 ################################
+                # 1. 그랜빌의 매수신호 4법칙 계산 ######################
+
+                pass_success = False
+
+                # 120일 이평선 조건 사용
+                if self.calcul_data == None or len(self.calcul_data) < 120:
+                    pass_success = False
+
+                else:
+                    # 120일 이평선의 최근 가격 구함
+                    total_price = 0
+                    for value in self.calcul_data[:120]:
+                        total_price += int(value[1])
+                    moving_average_price = total_price / 120
+
+                    # 오늘자 주가가 120일 이평선에 걸쳐 있는지 확인
+                    # 오늘의 저가가 120일 이평선 아래이고 고가는 120일 이평선 위에 있는경우
+                    bottom_stock_price = False
+                    check_price = None
+                    if int(self.calcul_data[0][7]) <= moving_average_price and moving_average_price <= int(self.calcul_data[0][6]):
+                        print('오늘 주가 120일 이평선에 걸쳐 있는지 확인')
+                        #self.logging.logger.debug("오늘의 주가가 120 이평선에 걸쳐있는지 확인")
+                        bottom_stock_price = True
+                        check_price = int(self.calcul_data[0][6])  # 고가 확인
+
+                    # 과거 주가가 계속 120일 이평선보다 밑에 있다가 올라왔는지 확인
+                    low_price_prev = None  # 과거 일봉 저가
+                    if bottom_stock_price == True:
+                        moving_average_price_prev = 0  # 과거의 120일 이평선
+                        price_top_moving = False  # 이평선 위로 가 있으면 True
+
+                        idx = 1
+                        while True:
+
+                            # 어제 이후 120일치 있는지 확인
+                            if len(self.calcul_data[idx:]) < 120:
+                                print('120일치 data 없음')
+                                break
+
+                            total_price = 0
+                            for value in self.calcul_data[idx:120+idx]:
+                                total_price += int(value[1])
+                            moving_average_price_prev = total_price / 120
+
+                            # max_day이상 고가가 120일 이평선 위에 있을 경우 제외
+                            max_day = 30
+                            if int(self.calcul_data[idx][6]) >= moving_average_price_prev and idx <= max_day:
+                                print('### 고가가 %s일 이상 120일 이평선 위에 있어서 제외됨' %
+                                      max_day)
+                                price_top_moving = False
+                                break
+
+                            # 저가가 120일 이평선 위에 있었다면 제외
+                            elif int(self.calcul_data[idx][7]) > moving_average_price_prev and idx > max_day:
+                                print('### 저가가 %s일 이상 120일 이평선 위에 있어서 제외됨' %
+                                      max_day)
+                                # self.logging.logger.debug('### 저가가 %s일 이상 120일 이평선 위에 있어서 제외됨' % max_day)
+                                price_top_moving = True  # 저가가 120일선 이평선 위에 존재
+                                # 이평선 위에 존재하는 저가를 저장
+                                low_price_prev = int(self.calcul_data[idx][7])
+                                break
+
+                            idx += 1
+
+                        # 해당 부분 이평선이 가장 최근 일자의 이평선 가격보다 낮은지 확인
+                        if price_top_moving == True:
+                            if moving_average_price > moving_average_price_prev and check_price > low_price_prev:
+                                print(
+                                    '### 포착된 이평선 가격이 오늘자 이평선 가격보다 낮고\n### 과거 일봉 저가가 오늘자 일봉의 고가보다 낮은 것 확인됨')
+                                #self.logging.logger.debug("포착된 이평선의 가격이 오늘자 이평선 가격보다 낮은 것 확인")
+                                #self.logging.logger.debug("포착된 부분의 일봉 저가가 오늘자 일봉의 고가보다 낮은지 확인")
+                                pass_success = True
+
+                if pass_success == True:
+                    print('조건부 통과\n')
+
+                    code_nm = self.dynamicCall(
+                        'GetMasterCodeName(QString)', code)
+
+                    f = open('%sfiles/condition_stock.txt' %
+                             dir, 'a', encoding='utf8')  # a는 연결해서 쓴다. w는 덮어쓴다.
+                    f.write('%s\t%s\t%s\n' %
+                            (code, code_nm, str(self.calcul_data[0][1])))
+                    f.close()
+
+                elif pass_success == False:
+                    print('조건부 통과 못함\n')
+
+                self.calcul_data.clear()
                 self.calculator_event_loop.exit()
 
-            self.detail_account_info_event_loop.exit()
+# 58강
 
 #### 주식 선택용 #############################################################
 
@@ -346,7 +476,7 @@ class Kiwoom(QAxWidget):
         code_list = self.dynamicCall(
             'GetCodeListByMarket(QString)', market_code)
         code_list = code_list.split(';')[:-1]
-        print(code_list)
+        # print(code_list) # Market 전체 code list
         return code_list
 
     # def get_code_list_by_mystock(self, mystock_code):  # 관심종목코드를 불러와서 사용
