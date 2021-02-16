@@ -12,7 +12,7 @@ class Kiwoom(QAxWidget):
     def __init__(self):
         super().__init__()
 
-        print('Kiwoom Class입니다.')
+        print('\n=====Kiwoom Open API Start======\n')
         #self.logging.logger.debug("Kiwoom() class start.")
         ##### event loop 모음 ############################
         self.login_event_loop = QEventLoop()  # 로그인 요청용 이벤트 루프
@@ -52,9 +52,8 @@ class Kiwoom(QAxWidget):
         self.get_account_info()     # 계좌번호 가져오기
         self.detail_account_info()  # 예수금 요청
         self.detail_account_mystock()  # 계좌평가잔고내역 요청
-        self.not_concluded_account()
         # 5초 뒤에 미체결 종목들 가져오기 실행
-        # QTimer.singleShot(5000, self.not_concluded_account)
+        QTimer.singleShot(5000, self.not_concluded_account)
 
         self.calculator_fnc()  # 종목분석 실행 (임시용)
 
@@ -110,7 +109,7 @@ class Kiwoom(QAxWidget):
         account_num = account_list.split(';')[0]  # a;b;c   [a, b, c]
 
         self.account_num = account_num
-        print('나의 보유계좌번호: %s' % self.account_num)  # 8158893311
+        print('\n보유계좌번호: %s' % self.account_num)  # 8158893311
         #self.logging.logger.debug("계좌번호 : %s" % account_num)
 
     def detail_account_info(self, sPrevNext="0"):  # 예수금 요청 부분
@@ -132,7 +131,7 @@ class Kiwoom(QAxWidget):
         # 한페이지 20개 종목까지검색가능 sPrevNext =0 다음페이지없음. 2 다음페이지
 
     def detail_account_mystock(self, sPrevNext='0'):  # 계좌평가잔고내역요청
-        print('계좌평가잔고내역요청_연속조회: %s' % sPrevNext)
+        print('계좌평가잔고내역요청_연속조회: %s\n' % sPrevNext)
 
         self.dynamicCall('SetInputValue(QString, QString)',
                          '계좌번호', self.account_num)
@@ -169,7 +168,7 @@ class Kiwoom(QAxWidget):
             max_order_amount = self.dynamicCall(
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '주문가능금액')
 
-            print('예수금: %s\n주문가능금액: %s' %
+            print('예수금: %s\n주문가능금액: %s\n' %
                   (int(deposit), int(max_order_amount)))
             #self.logging.logger.debug('예수금: %s\n주문가능금액: %s' % (int(deposit), int(max_order_amount)))
             # self.stop_screen_cancel(self.screen_my_info)
@@ -190,7 +189,7 @@ class Kiwoom(QAxWidget):
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '총수익률(%)')
             self.total_profit_rate = float(total_profit_rate)
 
-            print('총매입금액: %s\n총평가손익금액: %s\n총수익률(%%): %s' % (
+            print('총매입금액: %s\n총평가손익금액: %s\n총수익률(%%): %s\n' % (
                 int(total_buy_amount), int(total_profit_amount), float(total_profit_rate)))
             #self.logging.logger.debug("계좌평가잔고내역요청 싱글데이터 : %s - %s - %s" % (int(total_buy_amount), int(total_profit_amount), float(total_profit_rate)))
 
@@ -199,7 +198,7 @@ class Kiwoom(QAxWidget):
             rows = self.dynamicCall(
                 "GetRepeatCnt(QString, QString)", sTrCode, sRQName)
 
-            print(rows)
+            print('내 계좌에 있는 종목수: %s\n' % rows)
 
             for i in range(rows):
                 code = self.dynamicCall(
@@ -230,7 +229,7 @@ class Kiwoom(QAxWidget):
                 total_maeip_amount = int(total_maeip_amount.strip())
                 current_amount = int(current_amount.strip())
 
-                print('종목명: %s\n수익률(%%): %s\n매입가: %s\n현재가: %s\n보유수량: %s\n매입금액: %s\n평가금액: %s' % (
+                print('종목명: %s\n수익률(%%): %s\n매입가: %s\n현재가: %s\n보유수량: %s\n매입금액: %s\n평가금액: %s\n' % (
                     code_nm, learn_rate, buy_price, current_price, stock_quantity, total_maeip_amount, current_amount))
 
                 if code in self.account_stock_dict:
