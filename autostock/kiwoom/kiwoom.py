@@ -1,8 +1,11 @@
+from numpy.lib.function_base import _CORE_DIMENSION_LIST
 import pandas as pd
 import numpy as np
+import csv
 import os
 from PyQt5.QAxContainer import *  # 응용프로그램 제어용
 from PyQt5.QtCore import *
+from pandas.core.frame import DataFrame
 from autostock.config.errorCode import *
 from PyQt5.QtTest import *
 
@@ -31,8 +34,8 @@ class Kiwoom(QAxWidget):
         ##################################################
 
         ##### 변수 모음 ############################
-        self.dir = 'C:/Users/histi/py37_32/autostock/'
-        # max_day = 20 max_day 이상 고가/저가가 이평선 위에 있는 경우. 변수 검색하여 조정
+        # dir = 'C:/Users/histi/py37_32/autostock/' # 저장공간
+        # max_day = 20 # max_day 이상 고가/저가가 이평선 위에 있는 경우. 변수 검색하여 조정
         self.account_num = None
         self.account_stock_dict = {}  # 계좌평가잔고내역요청에 따른 계좌내 종목 dict
         self.not_account_stock_dict = {}  # 미체결내역 dict
@@ -58,8 +61,10 @@ class Kiwoom(QAxWidget):
         # 5초 뒤에 미체결 종목들 가져오기 실행
         # QTimer.singleShot(5000, self.not_concluded_account)
 
-        # self.calculator_fnc()  # 종목분석 실행 (임시용)
-        self.read_code()  # 저장된 종목을 불러온다.
+        # my_stock_list 종목분석 실행 (임시용)
+        self.get_code_list_by_mystock('my_stock')
+        self.calculator_fnc()  # 종목분석 실행 (임시용)
+        # self.read_code()  # 저장된 종목을 불러온다.
 
         ##################################################
 
@@ -157,10 +162,11 @@ class Kiwoom(QAxWidget):
         self.dynamicCall('CommRqData(QString, QString, int, QString)',
                          '실시간미체결현황', 'opt10075', sPrevNext, self.screen_my_info)
 
-########################## 요청에 대해서 받는 내용들 - TR 목록 #######################
+    ####################### 요청에 대해서 받는 내용들 - TR 목록 #######################
 
     def trdata_slot(self, sScrNo, sRQName, sTrCode, sRecordName, sPrevNext):
-        if sRQName == '예수금상세현황요청':  # TR 목록의 opw0001에 있는 output 항목을 가져올 수 있음.
+        # TR 목록의 opw0001에 있는 output 항목을 가져올 수 있음.
+        if sRQName == '예수금상세현황요청':
             deposit = self.dynamicCall(
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '예수금')
 
@@ -185,6 +191,10 @@ class Kiwoom(QAxWidget):
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '총매입금액')
             self.total_buy_amount = int(total_buy_amount)
 
+            total_amount_now = self.dynamicCall(
+                'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '총평가금액')
+            self.total_amount_now = int(total_amount_now)
+
             total_profit_amount = self.dynamicCall(
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '총평가손익금액')
             self.total_profit_amount = int(total_profit_amount)
@@ -193,9 +203,9 @@ class Kiwoom(QAxWidget):
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '총수익률(%)')
             self.total_profit_rate = float(total_profit_rate)
 
-            print('총매입금액: %s\n총평가손익금액: %s\n총수익률(%%): %s\n' % (
-                int(total_buy_amount), int(total_profit_amount), float(total_profit_rate)))
-            #self.logging.logger.debug("계좌평가잔고내역요청 싱글데이터 : %s - %s - %s" % (int(total_buy_amount), int(total_profit_amount), float(total_profit_rate)))
+            print('총매입금액: %s\n총평가금액: %s\n총평가손익금액: %s\n총수익률(%%): %s\n' % (
+                int(total_buy_amount), int(total_amount_now), int(total_profit_amount), float(total_profit_rate)))
+            #self.logging.logger.debug("계좌평가잔고내역요청 싱글데이터 : %s - %s - %s - %s" % (int(total_buy_amount),int(total_amount_now), int(total_profit_amount), float(total_profit_rate)))
 
             # 한page에 20개까지만 불러오기 가능.
 
@@ -222,7 +232,8 @@ class Kiwoom(QAxWidget):
                 current_amount = self.dynamicCall(
                     "GetCommData(QString, QString, int, QString)", sTrCode, sRQName, i, '평가금액')
 
-                #self.logging.logger.debug("종목번호: %s - 종목명: %s - 수익률: %s - 매입가:%s - 현재가: %s - 보유수량: %s " % (code, code_nm, learn_rate, buy_price, current_price, stock_quantity))
+                share = self.dynamicCall(
+                    'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '보유비중(%)')
 
                 code = code.strip()[1:]  # 공란을 제외하고, 두번자 글자부터 마지막까지
                 code_nm = code_nm.strip()
@@ -232,9 +243,11 @@ class Kiwoom(QAxWidget):
                 stock_quantity = int(stock_quantity.strip())
                 total_maeip_amount = int(total_maeip_amount.strip())
                 current_amount = int(current_amount.strip())
+                share = float(share)
 
-                print('종목명: %s\n수익률(%%): %s\n매입가: %s\n현재가: %s\n보유수량: %s\n매입금액: %s\n평가금액: %s\n' % (
-                    code_nm, learn_rate, buy_price, current_price, stock_quantity, total_maeip_amount, current_amount))
+                print('종목명: %s\n수익률(%%): %s\n매입가: %s\n현재가: %s\n보유수량: %s\n매입금액: %s\n평가금액: %s\n보유비중(%%): %s\n' % (
+                    code_nm, learn_rate, buy_price, current_price, stock_quantity, total_maeip_amount, current_amount, share))
+                #self.logging.logger.debug("종목번호: %s - 종목명: %s - 수익률: %s - 매입가:%s - 현재가: %s - 보유수량: %s - 보유비중(%%): %s " % (code, code_nm, learn_rate, buy_price, current_price, stock_quantity, share))
 
                 if code in self.account_stock_dict:
                     pass
@@ -251,6 +264,7 @@ class Kiwoom(QAxWidget):
                 asd.update({'보유수량': stock_quantity})
                 asd.update({'매입금액': total_maeip_amount})
                 asd.update({'평가금액': current_amount})
+                asd.update({'보유비중(%)': share})
 
             print('내 계좌에 있는 종목수: %s\n' % len(self.account_stock_dict))
             #self.logging.logger.debug("sPrevNext : %s" % sPrevNext)
@@ -261,6 +275,7 @@ class Kiwoom(QAxWidget):
             else:
                 self.detail_account_info_event_loop.exit()
 
+        # TR 목록의 opt10075에 있는 output 항목을 가져올 수 있음.
         elif sRQName == '실시간미체결현황':
             rows = self.dynamicCall(
                 "GetRepeatCnt(QString, QString)", sTrCode, sRQName)
@@ -320,6 +335,8 @@ class Kiwoom(QAxWidget):
 
             self.detail_account_info_event_loop.exit()
 
+        # TR 목록의 opt10081에 있는 output 항목을 가져올 수 있음.
+
         elif sRQName == "주식일봉차트조회":
 
             code = self.dynamicCall(
@@ -337,6 +354,8 @@ class Kiwoom(QAxWidget):
             # self.logging.logger.debug("남은 일자 수 %s" % cnt)
 
             # 한번조회할때 600일치까지 일봉 data를 받을 수 있다.
+            daily_df = pd.DataFrame(
+                [], columns=['', '현재가', '거래량', '거래금액', '일자', '시가', '고가', '저가', ''])
             for i in range(cnt):
                 # data = self.dynamicCall('GetCommData(QString, QString)', sTrCode, sRQName)
                 # 결과물 [['', '현재가', '거래량', '거래금액', '일자', '시가', '고가', '저가',''],['', '현재가', '거래량', '거래금액', '일자', '시가', '고가', '저가','']]
@@ -370,14 +389,19 @@ class Kiwoom(QAxWidget):
                 self.calcul_data.append(data.copy())
                 # calcul_data 내용 [['', '현재가', '거래량', '거래금액', '일자', '시가', '고가', '저가',''], [....]]
 
+                # daily_df = daily_df.append(
+                #     daily_df.iloc[-1], ignore_index=True)
+                # daily_df.iloc[-1] = self.calcul_data
+                # print(f'daily_df 길이: {len(daily_df)}')
+
             if sPrevNext == '2':
                 self.day_kiwoom_db(code=code, sPrevNext=sPrevNext)
 
             else:
                 print('총 일수 %s' % len(self.calcul_data))
 
-                ### 종목 선정 조건 설정 ################################
-                # 1. 그랜빌의 매수신호 4법칙 계산 ######################
+############### 종목 선정 조건 설정 #################################
+############### 1. 그랜빌의 매수신호 4법칙 계산 ######################
 
                 pass_success = False
 
@@ -422,7 +446,7 @@ class Kiwoom(QAxWidget):
                             moving_average_price_prev = total_price / 120
 
                             # max_day이상 고가가 120일 이평선 위에 있을 경우 제외
-                            max_day = 30
+                            max_day = 60
                             if int(self.calcul_data[idx][6]) >= moving_average_price_prev and idx <= max_day:
                                 print('### 고가가 %s일 이상 120일 이평선 위에 있어서 제외됨' %
                                       max_day)
@@ -456,8 +480,11 @@ class Kiwoom(QAxWidget):
                     code_nm = self.dynamicCall(
                         'GetMasterCodeName(QString)', code)
 
-                    f = open('%sfiles/condition_stock.txt' %
-                             dir, 'a', encoding='utf8')  # a는 연결해서 쓴다. w는 덮어쓴다.
+                    # a는 연결해서 쓴다. w는 덮어쓴다.
+                    f = open(f'{dir}files/condition_stock.txt',
+                             'a', encoding='utf8')
+                    f.write(
+                        f'{code}\t{code_nm}\t{str(self.calcul_data[0][1])}\n')
                     f.write('%s\t%s\t%s\n' %
                             (code, code_nm, str(self.calcul_data[0][1])))
                     f.close()
@@ -470,34 +497,71 @@ class Kiwoom(QAxWidget):
 
 # 58강
 
-#### 주식 선택용 #############################################################
+#### 주식 선택용(강의) #############################################################
 
-    def get_code_list_by_market(self, market_code):  # 종목코드들 반환
-        code_list = self.dynamicCall(
-            'GetCodeListByMarket(QString)', market_code)
-        code_list = code_list.split(';')[:-1]
-        # print(code_list) # Market 전체 code list
-        return code_list
+    # def get_code_list_by_market(self, market_code):  # 종목코드들 반환
+    #     code_list = self.dynamicCall(
+    #         'GetCodeListByMarket(QString)', market_code)
+    #     code_list = code_list.split(';')[:-1]
+    #     # print(code_list) # Market 전체 code list
+    #     return code_list
 
-    # def get_code_list_by_mystock(self, mystock_code):  # 관심종목코드를 불러와서 사용
-    #     pd.read_excel()
-    #     return my_code_list
+    # def calculator_fnc(self):  # 종목분석 실행용 함수
+    #     # code_list = self.get_code_list_by_market('0') #코스피 마켓
+    #     code_list = self.get_code_list_by_market('10')  # 코스닥 마켓
+    #     print('코스닥 종목 갯수: %s' % len(code_list))
+    #     #self.logging.logger.debug("코스닥 종목 갯수: %s " % len(code_list))
+
+    #     # code_list 안에서 index와 value를 모두 사용.enumerate
+    #     for idx, code in enumerate(code_list):
+    #         self.dynamicCall("DisconnectRealData(QString)",
+    #                          self.screen_calculation_stock)  # 스크린 연결 끊기
+    #         print('%s / %s : KOSDAQ Stock Code : %s is updating... ' %
+    #               (idx + 1, len(code_list), code))
+    #         #self.logging.logger.debug("%s / %s : KOSDAQ Stock Code : %s is updating... " % (idx + 1, len(code_list), code))
+
+    #         self.day_kiwoom_db(code=code)
+
+#### 주식 선택용(My stock list사용) #####################################################
+
+    # ### 하나의 관심섹터의 종목만 ####
+    # def get_code_list_by_mystock(self, my_stock):  # 나의 관심종목코드를 불러와서 사용
+    #     # my_stock = 'my_stock'
+    #     dir = 'C:/Users/histi/py37_32/autostock/'
+    #     df = pd.read_excel(f'{dir}files/{my_stock}.xls', dtype={'종목코드': str},) # sheet_name=0 특정sheet만
+    #     df = df.drop(['Unnamed: 0', '매입단가', '매입수량', '메모'],
+    #                  axis=1).dropna(how='all', axis=0)
+    #     return df
+
+    ### 모든 관심섹터의 종목 ####
+    def get_code_list_by_mystock(self, my_stock):  # 나의 관심종목코드를 불러와서 사용
+        my_stock = 'my_stock'
+        dir = 'C:/Users/histi/py37_32/autostock/'
+        df_all = pd.read_excel(
+            f'{dir}files/{my_stock}.xls', sheet_name=None, dtype={'종목코드': str})
+        df_all.keys()
+        concatted_df = pd.concat(df_all)
+        concatted_df.columns
+        df = concatted_df.drop(
+            ['Unnamed: 0', '매입단가', '매입수량', '메모'], axis=1).dropna(how='all', axis=0)
+        df = df.drop_duplicates(subset=['종목코드'], keep='first')
+        df = df.dropna(how='all', axis=1).reset_index()
+        return df
 
     def calculator_fnc(self):  # 종목분석 실행용 함수
-        # code_list = self.get_code_list_by_market('0') #코스피 마켓
-        code_list = self.get_code_list_by_market('10')  # 코스닥 마켓
-        print('코스닥 종목 갯수: %s' % len(code_list))
-        #self.logging.logger.debug("코스닥 종목 갯수: %s " % len(code_list))
+        code_list = self.get_code_list_by_mystock('my_stock')
+        print('나의 관심 종목 갯수: %s' % len(code_list))
+        # self.logging.logger.debug("코스닥 종목 갯수: %s " % len(code_list))
 
-        # code_list 안에서 index와 value를 모두 사용.enumerate
-        for idx, code in enumerate(code_list):
-            self.dynamicCall("DisconnectRealData(QString)",
-                             self.screen_calculation_stock)  # 스크린 연결 끊기
-            print('%s / %s : KOSDAQ Stock Code : %s is updating... ' %
-                  (idx + 1, len(code_list), code))
-            #self.logging.logger.debug("%s / %s : KOSDAQ Stock Code : %s is updating... " % (idx + 1, len(code_list), code))
-
+        for idx in code_list.index:
+            code = code_list.loc[idx, '종목코드']
+            print(
+                f'{idx+1} / {len(code_list)} : my Stock list Code : {code} is updating... ')
+            idx += idx
+            #self.logging.logger.debug("%s / %s : KOSDAQ Stock Code : %s is updating... " % (i + 1, len(code_list), code))
             self.day_kiwoom_db(code=code)
+
+########################################################################################
 
     def day_kiwoom_db(self, code=None, date=None, sPrevNext="0"):  # 주식일봉차트조회
         QTest.qWait(3600)  # 3.6초마다 딜레이를 준다..
@@ -512,6 +576,36 @@ class Kiwoom(QAxWidget):
                          "주식일봉차트조회", "opt10081", sPrevNext, self.screen_calculation_stock)
 
         self.calculator_event_loop.exec_()
+
+    # 매수 법칙 계산 들어가면 됨.
+
+    # def read_code(self):
+    #     if os.path.exists('%sfiles/condition_stock.txt' % dir):
+    #         f = open('%sfiles/condition_stock.txt', 'r', encoding='utf8')
+    #         lines = f.readlines()
+    #         for line in lines:
+    #             if line != "":
+    #                 ls = line.split('\t')  # [code, code_nm, 현재가]
+    #                 stock_code = ls[0]
+    #                 stock_name = ls[1]
+    #                 stock_price = int(ls[2].split('\n')[0])
+    #                 stock_price = abs(stock_price)  # 현재가가 하락종목일 경우, -현재가로 표시
+    #     else:
+    #         1
+
+    def read_code(self):
+        dir = 'C:/Users/histi/py37_32/autostock/'
+        if os.path.exists('%sfiles/my_stock.xls' % dir):
+            df = pd.read_excel(f'{dir}files/my_stock.xls', dtype={'종목코드': str})
+            df = df.set_index('종목코드')
+            df.columns
+            df = df.drop(['Unnamed: 0', '매입단가', '매입수량', '메모'],
+                         axis=1).dropna(how='all', axis=0)
+            # df = pd.Series([df])
+            # type(df)
+            df
+        else:
+            1
 
 
 # account_num = 8158893311
