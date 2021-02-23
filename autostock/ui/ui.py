@@ -1,3 +1,5 @@
+# UI 개발시 사용
+
 from autostock.kiwoom.kiwoom import *
 import sys
 from PyQt5.QtWidgets import *
