@@ -1,29 +1,42 @@
 ########### Kiwoom KPI를 활용한 자동주식거래 Program ############
-
+# kiwoom_get_code_list에서 read_code로 변경
 from numpy.lib.function_base import _CORE_DIMENSION_LIST
 import pandas as pd
+from pandas.core.frame import DataFrame
 import numpy as np
 import csv
 import os
 import sys
 import time  # roof 돌때 time.sleep(4) 4초 sleeping
+# from PyQt5 import QAxContainer
+# from PyQt5.QAxContainer import QAxWidget
+# from PyQt5.QtTest import QTest
+# from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QBoxLayout
+# from PyQt5 import QtCore
+# from PyQt5.QtCore import QObject
+
 from PyQt5.QAxContainer import *  # 응용프로그램 제어용
 from PyQt5.QtCore import *
-from pandas.core.frame import DataFrame
+from PyQt5.QtTest import *  # QTest를 통한 loop를 돌릴때 timesleep 효과
+
 from autostock.config.errorCode import *
-from PyQt5.QtTest import *
 from autostock.config.kiwoomType import *
+from autostock.config.log_class import *
+# from config.slack import *
+
 
 # QTest.qWait(3600) ## event loop에서 3.6초간 process를 기다려 준다.
-
 
 class Kiwoom(QAxWidget):
     def __init__(self):
         super().__init__()
 
-        print('\n===== Kiwoom Open API Start ======\n')
         self.realType = RealType()
-        # self.logging.logger.debug('Kiwoom() class start.')
+        self.logging = Logging()
+        # self.slack = Slack()  # 슬랙 동작
+
+        print('\n===== Kiwoom Open API Start ======\n')
+        self.logging.logger.debug("Kiwoom Open API logging start.")
 
         ##### event loop 모음 ############################
         self.login_event_loop = QEventLoop()  # 로그인 요청용 이벤트 루프
@@ -67,17 +80,19 @@ class Kiwoom(QAxWidget):
         self.get_account_info()     # 계좌번호 가져오기
         self.detail_account_info()  # 예수금 요청
         self.detail_account_mystock()  # 계좌평가잔고내역 요청
-        # 5초 뒤에 미체결 종목들 가져오기 실행 - 미체결종목 불러올때 오류 발생.
+
+        # 5초 뒤에 미체결 종목들 가져오기 실행 - 미체결종목 불러올때 오류 발생 향후 수정 요망.
         # QTimer.singleShot(5000, self.not_concluded_account)
 
         # my_stock_list 종목분석 실행 (임시용)
         # self.get_code_list_by_mystock('my_stock')
         # self.calculator_fnc()  # 종목분석 실행 (임시용)
-        self.read_code()  # 저장된 my_stock 불러오기.
+        # self.read_code()  # 저장된 my_stock 불러오기.
+        self.read_code('my_stock')
         self.screen_number_setting()  # 스크린 번호 할당
         self.real_event_slot()  # 실시간 거래를 위한 슬롯 연결
 
-        QTest.qWait(5000)
+        QTest.qWait(2000)  # 2초 delay
 
         #### 주식시장 시작/완료 확인 실행 #####################################################
 
@@ -98,7 +113,9 @@ class Kiwoom(QAxWidget):
             fids = self.realType.REALTYPE['주식체결']['체결시간']
             self.dynamicCall(
                 'SetRealReg(QString, QString, QString, QString)', screen_num, code, fids, '1')  # 추가등록이므로 1
-            print(
+            # print(
+            #    f'실시간 관리 종목Code: {code}, 종목명:{code_nm}, 스크린번호: {screen_num}, Fids 번호: {fids}')
+            self.logging.logger.debug(
                 f'실시간 관리 종목Code: {code}, 종목명:{code_nm}, 스크린번호: {screen_num}, Fids 번호: {fids}')
         # print(self.portfolio_stock_dict)
         # self.slack.notification(
@@ -129,13 +146,12 @@ class Kiwoom(QAxWidget):
 
     def signal_login_commConnect(self):
         self.dynamicCall('CommConnect()')  # 로그인 요청 시그널
-
         self.login_event_loop.exec_()  # 이벤트 루프 실행
 
     def login_slot(self, err_code):
-        print('Error 발생시 아래 error code를 확인하세요')
-        print(errors(err_code))
-        # self.logging.logger.debug(errors(err_code)[1])
+        # print('Error 발생시 아래 error code를 확인하세요')
+        # print(errors(err_code))
+        self.logging.logger.debug(errors(err_code)[1])
         # 로그인 처리가 완료됐으면 이벤트 루프를 종료한다.
         self.login_event_loop.exit()
 
@@ -145,8 +161,8 @@ class Kiwoom(QAxWidget):
         account_num = account_list.split(';')[0]  # a;b;c   [a, b, c]
 
         self.account_num = account_num
-        print('\n보유계좌번호: %s' % self.account_num)  # 8158893311
-        # self.logging.logger.debug('계좌번호 : %s' % account_num)
+        # print('\n보유계좌번호: %s' % self.account_num)  # 8158893311
+        self.logging.logger.debug('보유계좌번호: %s' % self.account_num)
 
     def detail_account_info(self, sPrevNext='0'):  # 예수금 요청 부분
 
@@ -167,7 +183,8 @@ class Kiwoom(QAxWidget):
         # 한페이지 20개 종목까지검색가능 sPrevNext =0 다음페이지없음. 2 다음페이지
 
     def detail_account_mystock(self, sPrevNext='0'):  # 계좌평가잔고내역요청
-        print('계좌평가잔고내역요청_연속조회: %s\n' % sPrevNext)
+        # print('\n계좌평가잔고내역요청_연속조회: %s' % sPrevNext)
+        self.logging.logger.debug('계좌평가잔고내역요청_연속조회: %s' % sPrevNext)
 
         self.dynamicCall('SetInputValue(QString, QString)',
                          '계좌번호', self.account_num)
@@ -180,11 +197,11 @@ class Kiwoom(QAxWidget):
         self.detail_account_info_event_loop.exec_()
 
     def not_concluded_account(self, sPrevNext='0'):  # 실시간미체결현황요청
-        print("실시간미체결요청")
-        # self.logging.logger.debug('미체결 종목 요청')
+        # print("\n실시간미체결요청")
+        self.logging.logger.debug("실시간미체결요청")
         self.dynamicCall("SetInputValue(QString, QString)",
                          "계좌번호", self.account_num)
-        #self.dynamicCall("SetInputValue(QString, QString)", "전체종목구분", "1")
+        # self.dynamicCall("SetInputValue(QString, QString)", "전체종목구분", "1")
         self.dynamicCall("SetInputValue(QString, QString)", "매매구분", "0")
         # self.dynamicCall("SetInputValue(QString, QString)", "종목코드", "001740") #SK네트웍스
         self.dynamicCall("SetInputValue(QString, QString)", "체결구분", "1")
@@ -210,9 +227,11 @@ class Kiwoom(QAxWidget):
             max_order_amount = self.dynamicCall(
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '주문가능금액')
 
-            print('예수금: %s\n주문가능금액: %s\n사용가능금액(use_money) : %s' %
+            print('\n예수금: %s\n주문가능금액: %s\n사용가능금액(use_money) : %s' %
                   (format(int(deposit), ','), format(int(max_order_amount), ','), format(int(use_money), ',')))
-            # self.logging.logger.debug('예수금: %s\n주문가능금액: %s' % (int(deposit), int(max_order_amount)))
+            self.logging.logger.debug('예수금: %s 주문가능금액: %s 사용가능금액(use_money) : %s' %
+                                      (format(int(deposit), ','), format(int(max_order_amount), ','), format(int(use_money), ',')))
+
             # self.stop_screen_cancel(self.screen_my_info)
 
             self.detail_account_info_event_loop.exit()
@@ -235,16 +254,15 @@ class Kiwoom(QAxWidget):
                 'GetCommData(QString, QString, int, QString)', sTrCode, sRQName, 0, '총수익률(%)')
             self.total_profit_rate = float(total_profit_rate)
 
-            print('총매입금액: %s\n총평가금액: %s\n총평가손익금액: %s\n총수익률(%%): %s\n' % (
+            print('\n총매입금액: %s\n총평가금액: %s\n총평가손익금액: %s\n총수익률(%%): %s\n' % (
                 format(int(total_buy_amount), ','), format(int(total_amount_now), ','), format(int(total_profit_amount), ','), float(total_profit_rate)))
-            # self.logging.logger.debug('계좌평가잔고내역요청 싱글데이터 : %s - %s - %s - %s' % (int(total_buy_amount),int(total_amount_now), int(total_profit_amount), float(total_profit_rate)))
+            self.logging.logger.debug('총매입금액: %s 총평가금액: %s 총평가손익금액: %s 총수익률(%%): %s' % (
+                format(int(total_buy_amount), ','), format(int(total_amount_now), ','), format(int(total_profit_amount), ','), float(total_profit_rate)))
 
             # 한page에 20개까지만 불러오기 가능.
 
             rows = self.dynamicCall(
                 'GetRepeatCnt(QString, QString)', sTrCode, sRQName)
-
-            print('내 계좌에 있는 종목수: %s\n' % rows)
 
             for i in range(rows):
                 code = self.dynamicCall(
@@ -278,7 +296,8 @@ class Kiwoom(QAxWidget):
 
                 print('종목명: %s\n수익률(%%): %s\n매입가: %s\n현재가: %s\n보유수량: %s\n매입금액: %s\n평가금액: %s\n' % (
                     code_nm, learn_rate, format(buy_price, ','), format(current_price, ','), format(stock_quantity, ','), format(total_maeip_amount, ','), format(current_amount, ',')))
-                # self.logging.logger.debug('종목코드: %s - 종목명: %s - 수익률: %s - 매입가:%s - 현재가: %s - 보유수량: %s' % (code, code_nm, learn_rate, buy_price, current_price, stock_quantity))
+                self.logging.logger.debug('종목명: %s 수익률(%%): %s 매입가: %s 현재가: %s 보유수량: %s 매입금액: %s 평가금액: %s' % (
+                    code_nm, learn_rate, format(buy_price, ','), format(current_price, ','), format(stock_quantity, ','), format(total_maeip_amount, ','), format(current_amount, ',')))
 
                 if code in self.account_stock_dict:
                     pass
@@ -298,8 +317,8 @@ class Kiwoom(QAxWidget):
                 asd.update({'매매가능수량': possible_quantity})
 
             print('내 계좌에 있는 종목수: %s\n' % len(self.account_stock_dict))
-            # self.logging.logger.debug('sPrevNext : %s' % sPrevNext)
-            # self.logging.logger.debug('계좌에 가지고 있는 종목은 %s ' % rows)
+            self.logging.logger.debug(
+                '내 계좌에 있는 종목수: %s' % len(self.account_stock_dict))
 
             if sPrevNext == '2':
                 self.detail_account_mystock(sPrevNext='2')
@@ -312,6 +331,7 @@ class Kiwoom(QAxWidget):
                 "GetRepeatCnt(QString, QString)", sTrCode, sRQName)
 
             print('미체결에 있는 종목수: %s\n' % rows)
+            self.logging.logger.debug('미체결에 있는 종목수: %s' % rows)
 
             for i in range(rows):
                 code = self.dynamicCall(
@@ -336,6 +356,8 @@ class Kiwoom(QAxWidget):
                     'GetCommDate(QString, QString, int, QString)', sTrCode, sRQName, i, '체결량')
 
                 print(f'sRQName == 실시간미체결요청 code 확인용:{code}')
+                self.logging.logger.debug(
+                    f'sRQName == 실시간미체결요청 code 확인용:{code}')
 
                 code = code.strip()  # code 첫글자에 영문이 없음. 그대로 사용
                 code_nm = code_nm.strip()
@@ -367,7 +389,8 @@ class Kiwoom(QAxWidget):
                 nasd.update({'체결량': ok_quantity})
 
                 print('미체결종목: %s\n' % self.not_account_stock_dict[code_nm])
-                # self.logging.logger.debug('미체결 종목 : %s ' % self.not_account_stock_dict[order_no])
+                self.logging.logger.debug(
+                    '미체결종목: %s\n' % self.not_account_stock_dict[code_nm])
 
             self.detail_account_info_event_loop.exit()
 
@@ -382,12 +405,13 @@ class Kiwoom(QAxWidget):
             # data = self.dynamicCall('GetCommDataEx(QString, QString)', sTrCode, sRQName)
 
             print('%s 주식일봉데이터요청' % code)
+            self.logging.logger.debug('%s 주식일봉데이터요청' % code)
 
             cnt = self.dynamicCall(
                 'GetRepeatCnt(QString, QString)', sTrCode, sRQName)
 
-            print('데이터 일수: %s\n' % cnt)
-            # self.logging.logger.debug('남은 일자 수 %s' % cnt)
+            print('남은 데이터 일자 수 %s' % cnt)
+            self.logging.logger.debug('남은 데이터 일자 수 %s' % cnt)
 
             # 한번조회할때 600일치까지 일봉 data를 받을 수 있다.
             daily_df = pd.DataFrame(
@@ -435,6 +459,7 @@ class Kiwoom(QAxWidget):
 
             else:
                 print('총 일수 %s' % len(self.calcul_data))
+                self.logging.logger.debug('총 일수 %s' % len(self.calcul_data))
 
 ############### 종목 선정 조건 설정 #################################
 ############### 1. 그랜빌의 매수신호 4법칙 계산 ######################
@@ -458,7 +483,7 @@ class Kiwoom(QAxWidget):
                     check_price = None
                     if int(self.calcul_data[0][7]) <= moving_average_price and moving_average_price <= int(self.calcul_data[0][6]):
                         print('오늘 주가 120일 이평선에 걸쳐 있는지 확인')
-                        # self.logging.logger.debug('오늘의 주가가 120 이평선에 걸쳐있는지 확인')
+                        self.logging.logger.debug('오늘 주가 120일 이평선에 걸쳐 있는지 확인')
                         bottom_stock_price = True
                         check_price = int(self.calcul_data[0][6])  # 고가 확인
 
@@ -474,6 +499,7 @@ class Kiwoom(QAxWidget):
                             # 어제 이후 120일치 있는지 확인
                             if len(self.calcul_data[idx:]) < 120:
                                 print('120일치 data 없음')
+                                self.logging.logger.debug('120일치 data 없음')
                                 break
 
                             total_price = 0
@@ -486,6 +512,8 @@ class Kiwoom(QAxWidget):
                             if int(self.calcul_data[idx][6]) >= moving_average_price_prev and idx <= max_day:
                                 print('### 고가가 %s일 이상 120일 이평선 위에 있어서 제외됨' %
                                       max_day)
+                                self.logging.logger.debug('### 고가가 %s일 이상 120일 이평선 위에 있어서 제외됨' %
+                                                          max_day)
                                 price_top_moving = False
                                 break
 
@@ -493,7 +521,8 @@ class Kiwoom(QAxWidget):
                             elif int(self.calcul_data[idx][7]) > moving_average_price_prev and idx > max_day:
                                 print('### 저가가 %s일 이상 120일 이평선 위에 있어서 제외됨' %
                                       max_day)
-                                # self.logging.logger.debug('### 저가가 %s일 이상 120일 이평선 위에 있어서 제외됨' % max_day)
+                                self.logging.logger.debug(
+                                    '### 저가가 %s일 이상 120일 이평선 위에 있어서 제외됨' % max_day)
                                 price_top_moving = True  # 저가가 120일선 이평선 위에 존재
                                 # 이평선 위에 존재하는 저가를 저장
                                 low_price_prev = int(self.calcul_data[idx][7])
@@ -506,27 +535,32 @@ class Kiwoom(QAxWidget):
                             if moving_average_price > moving_average_price_prev and check_price > low_price_prev:
                                 print(
                                     '### 포착된 이평선 가격이 오늘자 이평선 가격보다 낮고\n### 과거 일봉 저가가 오늘자 일봉의 고가보다 낮은 것 확인됨')
-                                # self.logging.logger.debug('포착된 이평선의 가격이 오늘자 이평선 가격보다 낮은 것 확인')
-                                # self.logging.logger.debug('포착된 부분의 일봉 저가가 오늘자 일봉의 고가보다 낮은지 확인')
+                                self.logging.logger.debug(
+                                    '### 포착된 이평선 가격이 오늘자 이평선 가격보다 낮고')
+                                self.logging.logger.debug(
+                                    '### 과거 일봉 저가가 오늘자 일봉의 고가보다 낮은 것 확인됨')
                                 pass_success = True
 
                 if pass_success == True:
-                    print('조건부 통과\n')
+                    print('조건부 통과')
+                    self.logging.logger.debug('조건부 통과')
 
                     code_nm = self.dynamicCall(
                         'GetMasterCodeName(QString)', code)
 
                     # a는 연결해서 쓴다. w는 덮어쓴다.
-                    f = open(f'{dir}files/condition_stock.txt',
+                    dir = 'C:/Users/histi/py37_32/autostock/'
+                    f = open(f'{dir}files/그랜빌_stock.txt',
                              'a', encoding='utf8')
                     f.write(
                         f'{code}\t{code_nm}\t{str(self.calcul_data[0][1])}\n')
-                    f.write('%s\t%s\t%s\n' %
-                            (code, code_nm, str(self.calcul_data[0][1])))
+                    # f.write('%s\t%s\t%s\n' %
+                    #         (code, code_nm, str(self.calcul_data[0][1])))
                     f.close()
 
                 elif pass_success == False:
                     print('조건부 통과 못함\n')
+                    self.logging.logger.debug('조건부 통과 못함')
 
                 self.calcul_data.clear()
                 self.calculator_event_loop.exit()
@@ -568,31 +602,34 @@ class Kiwoom(QAxWidget):
     #     return df
 
     ### 모든 관심섹터의 종목 ####
-    def get_code_list_by_mystock(self, my_stock):  # 나의 관심종목코드를 불러와서 사용
-        my_stock = 'my_stock'
-        dir = 'C:/Users/histi/py37_32/autostock/'
-        df_all = pd.read_excel(
-            f'{dir}files/{my_stock}.xls', sheet_name=None, dtype={'종목코드': str})
-        df_all.keys()
-        concatted_df = pd.concat(df_all)
-        concatted_df.columns
-        df = concatted_df.drop(
-            ['Unnamed: 0', '매입단가', '매입수량', '메모'], axis=1).dropna(how='all', axis=0)
-        df = df.drop_duplicates(subset=['종목코드'], keep='first')
-        df = df.dropna(how='all', axis=1).reset_index()
-        return df
+    # def get_code_list_by_mystock(self, my_stock):  # 나의 관심종목코드를 불러와서 사용
+    #     my_stock = 'my_stock'
+    #     dir = 'C:/Users/histi/py37_32/autostock/'
+    #     df_all = pd.read_excel(
+    #         f'{dir}files/{my_stock}.xls', sheet_name=None, dtype={'종목코드': str})
+    #     df_all.keys()
+    #     concatted_df = pd.concat(df_all)
+    #     concatted_df.columns
+    #     df = concatted_df.drop(
+    #         ['Unnamed: 0', '매입단가', '매입수량', '메모'], axis=1).dropna(how='all', axis=0)
+    #     df = df.drop_duplicates(subset=['종목코드'], keep='first')
+    #     df = df.dropna(how='all', axis=1).reset_index()
+    #     return df
 
     def calculator_fnc(self):  # 종목분석 실행용 함수
-        code_list = self.get_code_list_by_mystock('my_stock')
-        print('나의 관심 종목 갯수: %s' % len(code_list))
-        # self.logging.logger.debug('코스닥 종목 갯수: %s ' % len(code_list))
+        # code_list = self.get_code_list_by_mystock('my_stock')
+        code_list = self.read_code('my_stock')
+        print('나의 관심 종목 갯수: %s종목' % len(code_list))
+        print(f'나의 관심 종목 list\n{code_list}')
+        #self.logging.logger.debug('나의 관심 종목 갯수: %s' % len(code_list))
 
         for idx in code_list.index:
             code = code_list.loc[idx, '종목코드']
             print(
                 f'{idx+1} / {len(code_list)} : my Stock list Code : {code} is updating... ')
-            # idx += idx ? idx += 1 ?
-            # self.logging.logger.debug('%s / %s : KOSDAQ Stock Code : %s is updating... ' % (i + 1, len(code_list), code))
+            # idx += 1
+            self.logging.logger.debug(
+                f'{idx+1} / {len(code_list)} : my Stock list Code : {code} is updating... ')
             self.day_kiwoom_db(code=code)
 
 ########################################################################################
@@ -612,7 +649,8 @@ class Kiwoom(QAxWidget):
         self.calculator_event_loop.exec_()
 
 #### My stock list 나의 관심 종목 불러오기 ############################################
-    def read_code(self):
+    # def read_code(self):
+    def read_code(self, my_stock):
         my_stock = 'my_stock'
         dir = 'C:/Users/histi/py37_32/autostock/'
         df_all = pd.read_excel(
@@ -626,12 +664,12 @@ class Kiwoom(QAxWidget):
         df = df.dropna(how='all', axis=1).reset_index()
         stock_code = df['종목코드'].values
         stock_n = df['종목명'].values
+
         stock_name = []
         for i in stock_n:
             stock_name.append({'종목명': i})
         self.portfolio_stock_dict = dict(zip(stock_code, stock_name))
-
-        # return df
+        return df
 
     def screen_number_setting(self):
         screen_overwite = []
@@ -685,7 +723,7 @@ class Kiwoom(QAxWidget):
 # my stock list Dict 저장 code:{'225190': {'종목명': '삼양옵틱스', '스크린번호': '5001', '주문용스크린번호': '6001'}
 
         dir = 'C:/Users/histi/py37_32/autostock/'
-        f = open(f'{dir}files/condition_stock.txt',
+        f = open(f'{dir}files/portforlio_stock.txt',
                  'w', encoding='utf8')
         f.write(
             f'{str(self.portfolio_stock_dict)}')
@@ -702,24 +740,25 @@ class Kiwoom(QAxWidget):
             value = self.dynamicCall(
                 'GetCommRealData(QString, int)', sCode, fid)
             print(f'장운영구분_no:{fid}, fid_no={value}')
+            self.logging.logger.debug(f'장운영구분_no:{fid}, fid_no={value}')
 
             if value == '0':
                 print('장 시작 전')
-                # self.logging.logger.debug('장 시작 전')
+                self.logging.logger.debug('장 시작 전')
 
             elif value == '3':
                 print('장 시작')
-                # self.logging.logger.debug('장 시작')
+                self.logging.logger.debug('장 시작')
 
             elif value == '2':
                 print('장 종료, 동시호가로 넘어감')
-                # self.logging.logger.debug('장 종료, 동시호가로 넘어감')
+                self.logging.logger.debug('장 종료, 동시호가로 넘어감')
 
 # 전체 계좌 종목 일괄매도 프로그램 계발 예정 ===========================================
 
             elif value == '4':
                 print('3시30분 장 종료')
-                # self.logging.logger.debug('3시30분 장 종료')
+                self.logging.logger.debug('3시30분 장 종료')
 
                 # 장마감 후, 사용한 list 모두 삭제
                 for code in self.portfolio_stock_dict.keys():
@@ -793,128 +832,187 @@ class Kiwoom(QAxWidget):
             self.portfolio_stock_dict[sCode].update({'시가': j})
             self.portfolio_stock_dict[sCode].update({'저가': k})
 
-            # print(self.portfolio_stock_dict[sCode])
+############## code 포함한 log 만들기 ###################################
+
+            # print(self.portfolio_stock_dict[sCode]) #key값을 제외하고 출력
+            # self.logging.logger.debug(self.portfolio_stock_dict[sCode]) #key값을 제외하고 출력
+
+            print(self.portfolio_stock_dict)
+            # self.logging.logger.debug(self.portfolio_stock_dict)
+
+            dir = 'C:/Users/histi/py37_32/autostock/files/tic_data/'
+            day = format(datetime.now(), '%Y-%m-%d')
+            # t_d = {sCode : {'date' : day})
+            #portfolio_stock_tic_data = self.portfolio_stock_dict[sCode].update({'date': t_d})
+
+            f = open(f'{dir}{day}_v1.txt', 'a', encoding='utf8')
+            f1 = open(f'{dir}{day}_v2.txt', 'a', encoding='utf8')
+
+            f.write(f'{str(self.portfolio_stock_dict)}\n')
+            f1.write(f'{str(self.portfolio_stock_dict)}')
+            # f.write(f'{str(portfolio_stock_tic_data)}\n')
+        # f.close()
+        # f1.close()
 
 #### 2. 주식 주문을 위한 조건문 구성 ####################################
+        # self.portfolio_stock_dict[sCode].update({'체결시간': a})
+        # self.portfolio_stock_dict[sCode].update({'현재가': b})
+        # self.portfolio_stock_dict[sCode].update({'전일대비': c})
+        # self.portfolio_stock_dict[sCode].update({'등락율': d})
+        # self.portfolio_stock_dict[sCode].update({'(최우선)매도호가': e})
+        # self.portfolio_stock_dict[sCode].update({'(최우선)매수호가': f})
+        # self.portfolio_stock_dict[sCode].update({'거래량': g})
+        # self.portfolio_stock_dict[sCode].update({'누적거래량': h})
+        # self.portfolio_stock_dict[sCode].update({'고가': i})
+        # self.portfolio_stock_dict[sCode].update({'시가': j})
+        # self.portfolio_stock_dict[sCode].update({'저가': k})
+
+# 매수, 매도 가격조건 설정 =====================================================
+
+        buy_price = 0  # 매도주문 가격 조건 선택:시장가
+        order_price = 0  # 매수주문 가격 조건 선택: 현재가 = b
+        # order_price = f # 매수주문 가격 조건 선택: '(최우선)매수호가'
+
 
 # 매수, 손절, 익절 % 설정 =====================================================
 
-            # buying_up_rate = 1.0  # 신규 매수 기준 등락율이 1% 이상 종목, 현재 잔고에 없을 경우.
-            buying_down_rate = -4.5  # 신규 매수 기준 등락율이 -4.5% 이상 종목, 현재 잔고에 없을 경우.
-            expected_profit_rate = 4.0
-            expected_loss_rate = -2.0
+        # buying_up_rate = 1.0  # 신규 매수 기준 등락율이 1% 이상 종목, 현재 잔고에 없을 경우.
+        buying_down_rate = -4.5  # 신규 매수 기준 등락율이 -4.5% 이상 종목, 현재 잔고에 없을 경우.
+        expected_profit_rate = 4.0  # 수익실현
+        expected_loss_rate = -2.0  # 손절
 
 # 계좌잔고평가내역(account_stock_dict)에 있고 오늘 매수한 잔고에 없는 경우 ==========
-            if sCode in self.account_stock_dict.keys() and sCode not in self.jango_dict.keys():
-                asd = self.account_stock_dict[sCode]
-                code_nm = asd['종목명']
+        if sCode in self.account_stock_dict.keys() and sCode not in self.jango_dict.keys():
+            asd = self.account_stock_dict[sCode]
+            code_nm = asd['종목명']
+            print(self.account_stock_dict)
+            self.logging.logger.debug(self.account_stock_dict)
 
-                meme_rate = (b - asd['매입가']) / asd['매입가'] * 100  # 등락율
-                print(f'계좌내 {code_nm} - meme_rate = {meme_rate}')
+            meme_rate = (b - asd['매입가']) / asd['매입가'] * 100  # 등락율
 
             # LONG nPrice -> 0 이면 시장가로 주문.
-                if asd['매매가능수량'] > 0 and (meme_rate > expected_profit_rate or meme_rate < expected_loss_rate):
-                    order_success = self.dynamicCall(
-                        'SendOrder(QString, QString, QString, int, QString, int, int, QString, QString)',
-                        ['신규매도', self.portfolio_stock_dict[sCode]['주문용스크린번호'], self.account_num,
-                            2, sCode, asd['매매가능수량'], 0, self.realType.SENDTYPE['거래구분']['시장가'], ""]
-                    )
+            if asd['매매가능수량'] > 0 and (meme_rate > expected_profit_rate or meme_rate < expected_loss_rate):
+                order_success = self.dynamicCall(
+                    'SendOrder(QString, QString, QString, int, QString, int, int, QString, QString)',
+                    ['신규매도', self.portfolio_stock_dict[sCode]['주문용스크린번호'], self.account_num,
+                        2, sCode, asd['매매가능수량'], buy_price, self.realType.SENDTYPE['거래구분']['시장가'], ""]
+                )
 
-                    if order_success == 0:
-                        print(f'계좌잔고 종목-{sCode}-{code_nm}-매도성공')
-                        # self.logging.logger.debug('매도주문 전달 성공')
-                        del self.account_stock_dict[sCode]
-                    else:
-                        print(f'계좌잔고 종목-{sCode}-{code_nm}-매도실패')
-                        # self.logging.logger.debug('매도주문 전달 실패')
+                if order_success == 0:
+                    print(f'계좌잔고 종목: {sCode}, {code_nm}, 매도 주문 성공')
+                    print('주문시점 meme_rate = %s' %
+                          format(round(meme_rate, 2)))
+                    self.logging.logger.debug(
+                        f'계좌잔고 종목: {sCode}, {code_nm}, 매도 주문 성공')
+                    self.logging.logger.debug('주문시점 meme_rate = %s' %
+                                              format(round(meme_rate, 2)))
+                    del self.account_stock_dict[sCode]
+                else:
+                    print(f'계좌잔고 종목: {sCode}, {code_nm}, 매도 주문 실패')
+                    self.logging.logger.debug(
+                        f'계좌잔고 종목: {sCode}, {code_nm}, 매도 주문 실패')
 
-                    QTest.qWait(1000)
+                QTest.qWait(100)  # 0.1초
 
 # 오늘 매입한 종목. 잔고에 있을 경우 =====================================================
 
-            elif sCode in self.jango_dict.keys():
-                jd = self.jango_dict[sCode]
-                code_nm = jd['종목명']
+        elif sCode in self.jango_dict.keys():
+            jd = self.jango_dict[sCode]
+            code_nm = jd['종목명']
+            print(self.jango_dict)
+            self.logging.logger.debug(self.jango_dict)
 
-                meme_rate = (b - jd['매입단가']) / jd['매입단가'] * 100  # 등락율
-                print(f'오늘매수한 종목 {code_nm} - meme_rate = {meme_rate}')
+            meme_rate = (b - jd['매입단가']) / jd['매입단가'] * 100  # 등락율
 
-                if jd['주문가능수량'] > 0 and (meme_rate > expected_profit_rate or meme_rate < -expected_loss_rate):
-                    order_success = self.dynamicCall(
-                        'SendOrder(QString, QString, QString, int, QString, int, int, QString, QString)',
-                        ['신규매도', self.portfolio_stock_dict[sCode]['주문용스크린번호'], self.account_num,
-                            2, sCode, jd['주문가능수량'], 0, self.realType.SENDTYPE['거래구분']['시장가'], '']
-                    )
+            if jd['주문가능수량'] > 0 and (meme_rate > expected_profit_rate or meme_rate < expected_loss_rate):
+                order_success = self.dynamicCall(
+                    'SendOrder(QString, QString, QString, int, QString, int, int, QString, QString)',
+                    ['신규매도', self.portfolio_stock_dict[sCode]['주문용스크린번호'], self.account_num,
+                        2, sCode, jd['주문가능수량'], buy_price, self.realType.SENDTYPE['거래구분']['시장가'], '']
+                )
 
-                    if order_success == 0:
-                        print(f'오늘매수한 종목-{sCode}-{code_nm}-매도 성공')
-                        # self.logging.logger.debug('매도주문 전달 성공')
-                    else:
-                        print(f'오늘매수한 종목-{sCode}-{code_nm}-매도 실패')
-                        # self.logging.logger.debug('매도주문 전달 실패')
+                if order_success == 0:
+                    print(f'오늘매수한 종목: {sCode}, {code_nm}, 매도 주문 성공')
+                    print('주문시점 meme_rate = %s' %
+                          format(round(meme_rate, 2)))
+                    self.logging.logger.debug(
+                        f'오늘매수한 종목: {sCode}, {code_nm}, 매도 주문 성공')
+                    self.logging.logger.debug('주문시점 meme_rate = %s' %
+                                              format(round(meme_rate, 2)))
+                else:
+                    print(f'오늘매수한 종목: {sCode}, {code_nm}, 매도 주문 실패')
+                    self.logging.logger.debug(
+                        f'오늘매수한 종목: {sCode}, {code_nm}, 매도 주문 실패')
 
-                    QTest.qWait(1000)
+                QTest.qWait(100)  # 0.1초
 
-# 매수 실행 : e : 현재가 기준으로 =====================================================
-# 신규 매수 기준 등락율이 buying_up_rate 5% 제외
-# buying_down_rate % 종목, 현재 잔고에 있을 경우 매수제외
+# 매수 실행 : d = '등락율', b = '현재가' =====================================================
+# 당일 신규 매수 기준 등락율이 buying_up_rate % 제외
+# 당일 관심종목 buying_down_rate % 미만, 현재 계좌와 당일 매수 잔고에 있을 경우 매수제외
 
-                    # d > buying_up_rate or
             elif d < buying_down_rate and sCode in self.account_stock_dict:
                 # self.logging.logger.debug('매수조건 통과 %s ' % sCode)
                 code_nm = self.portfolio_stock_dict[sCode]['종목명']
                 # print(
                 #    f'self.account_stock_dict 내용은 : {self.account_stock_dict}')
-                print(f'{code_nm}-매수조건 충족했지만 종목당 매수 한계입니다.')
+                print(f'{code_nm} 매수조건 충족했지만 계좌에 있는 종목, 매수 제한입니다.')
+                self.logging.logger.debug(
+                    f'{code_nm} 매수조건 충족했지만 계좌에 있는 종목, 매수 제한입니다.')
 
-                QTest.qWait(1000)
+                QTest.qWait(100)  # 0.1초
 
-# 신규 매수 기준 등락율이 buying_up_rate 5% 이상 or buying_down_rate 미만인 종목, 현재 잔고에 없을 경우.
-# 신규 매수 포함 종목당 총잔고가 1000만원 초과할 경우, 매수 한계 표시.
-                # d > buying_up_rate or
+            elif d < buying_down_rate and sCode in self.jango_dict:
+                code_nm = self.portfolio_stock_dict[sCode]['종목명']
+                # print(
+                #    f'self.jango_dict 내용은 : {self.jango_dict}')
+                print(f'{code_nm} 매수조건 충족했지만 당일 매수잔고에 있는 종목, 매수 제한입니다.')
+                self.logging.logger.debug(
+                    f'{code_nm} 매수조건 충족했지만 당일 매수잔고에 있는 종목, 매수 제한입니다.')
+
+                QTest.qWait(100)  # 0.1초
+
+# 신규 매수 기준 등락율이 buying_up_rate % 이상 or buying_down_rate 미만인 종목, 현재 잔고에 없을 경우.
+# 신규 매수 포함 종목당 총잔고가 500만원 초과할 경우, 매수 한계 표시.
+                # d = '등락율' b = '현재가'
             elif d < buying_down_rate and sCode not in self.jango_dict:
-                # self.logging.logger.debug('매수조건 통과 %s ' % sCode)
                 code_nm = self.portfolio_stock_dict[sCode]['종목명']
 
-                # print(
-                #    f'self.account_stock_dict 내용은 : {self.account_stock_dict}')
+                # print(f'self.jango_dict 내용은 : {self.jango_dict}')
 
-                # if self.account_stock_dict[sCode]['매입금액'] == os.error:
-                #     account_total_price = 0
-                # else:
-                # account_total_price = self.account_stock_dict[sCode]['매입금액']
-                # account_total_price = int(account_total_price)
+                # order_price = 112000
+                # use_money = 2467861
+                # code_nm = 'TEST'
 
-                # c = 900
-                # use_money = 200000000
+                result = abs(int(self.use_money * 0.01))
+                quantity = int((result) / order_price)
 
-                result = (self.use_money * 0.02)
-                quantity = int((result) / c)
+                print('신규매수 종목: %s\n매수주문 금액: %s\n매수주문 수량 : %s\n현재가: %s' %
+                      (code_nm, format((result), ','), format((quantity), ','), format((order_price), ',')))
+                self.logging.logger.debug('신규매수 종목: %s 매수주문 금액: %s 매수주문 수량: %s 현재가: %s' %
+                                          (code_nm, format((result), ','), format((quantity), ','), format((order_price), ',')))
 
-                print('%s-매수사용금액은 %s 수량은 %s주 입니다.' %
-                      (code_nm, format((result), ','), format((quantity), ',')))
+                order_success = self.dynamicCall(
+                    "SendOrder(QString, QString, QString, int, QString, int, int, QString, QString)",
+                    ["신규매수", self.portfolio_stock_dict[sCode]["주문용스크린번호"], self.account_num,
+                        1, sCode, quantity, order_price, self.realType.SENDTYPE['거래구분']['지정가'], ""]
+                )
 
-                if result > 3000000:
-                    print('종목당 매수 한계입니다.')
+                if order_success == 0:
+                    print(
+                        f'신규매수 종목:{sCode}, {code_nm}, {quantity}주 매수 주문 성공')
+                    print('신규매수 주문시점 등락율 = %s' % (format(round(d, 2))))
+                    self.logging.logger.debug(
+                        f'신규매수 종목:{sCode}, {code_nm}, {quantity}주 매수 주문 성공')
+                    self.logging.logger.debug(
+                        '신규매수 주문시점 등락율 = %s' % (format(round(d, 2))))
 
                 else:
-                    print('매수사용금액은 use_money의 2%%인 : %s 입니다.' %
-                          (format(int(quantity), ',')))
-                    order_success = self.dynamicCall(
-                        "SendOrder(QString, QString, QString, int, QString, int, int, QString, QString)",
-                        ["신규매수", self.portfolio_stock_dict[sCode]["주문용스크린번호"], self.account_num,
-                            1, sCode, quantity, c, self.realType.SENDTYPE['거래구분']['지정가'], ""]
-                    )
-                    if order_success == 0:
-                        print(
-                            f'{sCode}-{code_nm}-신규매수 성공')
-                        # self.logging.logger.debug('매수주문 전달 성공')
-                    else:
-                        print(
-                            f'{sCode}-{code_nm}-신규매수 실패')
-                        # self.logging.logger.debug('매수주문 전달 실패')
+                    print(
+                        f'신규매수 종목:{sCode}, {code_nm}, {quantity}주 매수 주문 실패')
+                    self.logging.logger.debug(
+                        f'신규매수 종목:{sCode}, {code_nm}, {quantity}주 매수 주문 실패')
 
-            QTest.qWait(2000)
+                QTest.qWait(100)  # 0.1초
 
 # 매매 list 작성, meme_list update  =====================================================================
 
@@ -930,8 +1028,9 @@ class Kiwoom(QAxWidget):
                 not_quantity = self.not_account_stock_dict[order_num]['미체결수량']
                 order_gubun = self.not_account_stock_dict[order_num]['주문구분']
 
-                if order_gubun == '매수' and not_quantity > 0 and e > meme_price:  # e:현재가, 아래 0은 전체 취소.
+                if order_gubun == '매수' and not_quantity > 0 and buy_price > meme_price:  # 아래 0은 전체 취소.
                     print('매수취소한다')
+                    self.logging.logger.debug('매수취소한다')
                     order_success = self.dynamicCall(
                         'SendOrder(QString, QString, QString, int, QString, int, int, QString, QString)',
                         ['매수취소', self.portfolio_stock_dict[sCode]['주문용스크린번호'], self.account_num,
@@ -939,11 +1038,13 @@ class Kiwoom(QAxWidget):
                     )
 
                     if order_success == 0:
-                        print(f'{code}-{code_nm}-매수취소 전달 성공')
-                        # self.logging.logger.debug('매수취소 전달 성공')
+                        print(f'{code}, {code_nm} 매수취소 전달 성공')
+                        self.logging.logger.debug(
+                            f'{code}, {code_nm} 매수취소 전달 성공')
                     else:
-                        print(f'{code}-{code_nm}-매수취소 전달 실패')
-                        # self.logging.logger.debug('매수취소 전달 실패')
+                        print(f'{code}, {code_nm}-매수취소 전달 실패')
+                        self.logging.logger.debug(
+                            f'{code}, {code_nm}-매수취소 전달 실패')
 
                 elif not_quantity == 0:   # 미체결 수량이 0 면 삭제. 단타의 경우, for문을 위해서 삭제.
                     del self.not_account_stock_dict[order_num]
@@ -1078,7 +1179,7 @@ class Kiwoom(QAxWidget):
             buy_price = abs(int(buy_price))
 
             total_buy_price = self.dynamicCall(
-                'GetChejanData(int)', self.realType.REALTYPE['잔고']['총매입가'])  # 계좌에 있는 종목의 총매입가
+                'GetChejanData(int)', self.realType.REALTYPE['잔고']['총매입가'])  # 계���������에 있는 종목의 총매입가
             total_buy_price = int(total_buy_price)
 
             meme_gubun = self.dynamicCall(
@@ -1116,14 +1217,14 @@ class Kiwoom(QAxWidget):
     def msg_slot(self, sScrNo, sRQName, sTrCode, msg):
         print('스크린: %s, 요청이름: %s, tr코드: %s, ----- %s' %
               (sScrNo, sRQName, sTrCode, msg))
-        # self.logging.logger.debug(
-        #     '스크린: %s, 요청이름: %s, tr코드: %s --- %s' % (sScrNo, sRQName, sTrCode, msg))
+        self.logging.logger.debug('스크린: %s, 요청이름: %s, tr코드: %s, ----- %s' %
+                                  (sScrNo, sRQName, sTrCode, msg))
 
 
 # 장마감 후, 생성 화일 삭제
     # def file_delete(self):
-    #     if os.path.isfile('f'{dir}files/condition_stock.txt'):
-    #         os.remove(f'{dir}files/condition_stock.txt')
+    #     if os.path.isfile('f'{dir}files/portforlio_stock.txt'):
+    #         os.remove(f'{dir}files/portforlio_stock.txt')
 
 
 # Finish ========================================================================
@@ -1178,3 +1279,12 @@ class Kiwoom(QAxWidget):
 #   BSTR sHogaGb,   // 거래구분(혹은 호가구분)은 아래 참고
 #   BSTR sOrgOrderNo  // 원주문번호. 신규주문에는 공백 입력, 정정/취소시 입력합니다.
 #   )
+
+
+# 종목명 : LG디스플레이
+# 신규매수주문 금액 : 9,963,776
+# 신규매수주문 수량 : 7,380
+# 034220-LG디스플레이-7380주 매수 주문 전달 성공
+# 계좌내 LG디스플레이, buying_down_rate = -4.5
+# 스크린: 6001, 요청이름: 신규매수, tr코드: KOA_NORMAL_BUY_KP_ORD, ----- [00Z218] 모의투
+# 자 장종료 상태입니다
